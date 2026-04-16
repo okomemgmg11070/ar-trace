@@ -1,57 +1,130 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>ARトレース：画像アップロード版</title>
-    <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
-    <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>固定式トレースツール</title>
     <style>
-      .ui-panel {
-        position: fixed; top: 10px; left: 10px; z-index: 1000;
-        background: rgba(255,255,255,0.9); padding: 15px; border-radius: 10px; width: 250px;
-      }
-      input { width: 100%; margin-top: 5px; }
-    </style>
-  </head>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }
+        
+        /* 背面のカメラ映像 */
+        #video { width: 100%; height: 100%; object-fit: cover; position: absolute; z-index: 1; }
 
-  <body style="margin: 0; overflow: hidden;">
-    <div class="ui-panel">
-      <label>1. お手本を選ぶ</label>
-      <input type="file" id="fileInput" accept="image/*">
-      <br><br>
-      <label>2. 透明度</label>
-      <input type="range" id="opacitySlider" min="0" max="1" step="0.1" value="0.5">
+        /* UIパネル */
+        .controls {
+            position: fixed; top: 10px; left: 10px; z-index: 100;
+            background: rgba(0,0,0,0.7); color: white; padding: 10px; border-radius: 8px; font-size: 12px;
+        }
+
+        /* 変形させるコンテナ */
+        #warp-container {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 10; pointer-events: none; /* 下のカメラが見えるように */
+        }
+
+        /* 投影画像 */
+        #overlay-img {
+            position: absolute; display: none; transform-origin: 0 0;
+            pointer-events: none;
+        }
+
+        /* 操作用ハンドル（4つの角） */
+        .handle {
+            width: 30px; height: 30px; background: rgba(255, 0, 0, 0.6);
+            border: 2px solid white; border-radius: 50%; position: absolute;
+            z-index: 20; pointer-events: auto; transform: translate(-15px, -15px);
+        }
+    </style>
+</head>
+<body>
+
+    <video id="video" autoplay playsinline></video>
+
+    <div class="controls">
+        <input type="file" id="fileInput" accept="image/*"><br>
+        透明度: <input type="range" id="opacitySlider" min="0" max="1" step="0.1" value="0.5"><br>
+        <button onclick="resetHandles()">位置リセット</button>
     </div>
 
-    <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;">
-      <a-marker preset="hiro">
-        <a-image id="traceImage" position="0 0 0" rotation="-90 0 0" width="2" height="2" opacity="0.5"></a-image>
-      </a-marker>
-      <a-entity camera></a-entity>
-    </a-scene>
+    <div id="warp-container">
+        <img id="overlay-img" src="">
+        <div id="h0" class="handle"></div>
+        <div id="h1" class="handle"></div>
+        <div id="h2" class="handle"></div>
+        <div id="h3" class="handle"></div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/numeric/1.2.6/numeric.min.js"></script>
 
     <script>
-      const fileInput = document.getElementById('fileInput');
-      const opacitySlider = document.getElementById('opacitySlider');
-      const traceImage = document.getElementById('traceImage');
+        const video = document.getElementById('video');
+        const img = document.getElementById('overlay-img');
+        const handles = [document.getElementById('h0'), document.getElementById('h1'), document.getElementById('h2'), document.getElementById('h3')];
+        let hPos = [{x:50, y:50}, {x:250, y:50}, {x:250, y:250}, {x:50, y:250}]; // 初期座標
+        let imgWidth = 0, imgHeight = 0;
 
-      // iPhoneのライブラリから画像を読み込む処理
-      fileInput.addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (file) {
-          const reader = new FileReader();
-          reader.onload = (event) => {
-            // A-Frameの画像要素に読み込んだ画像をセット
-            traceImage.setAttribute('src', event.target.result);
-          };
-          reader.readAsDataURL(file);
+        // カメラ起動
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false })
+            .then(stream => { video.srcObject = stream; })
+            .catch(err => alert("カメラが起動できません: " + err));
+
+        // 画像読み込み
+        document.getElementById('fileInput').onchange = (e) => {
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                img.src = ev.target.result;
+                img.style.display = 'block';
+                img.onload = () => {
+                    imgWidth = img.naturalWidth;
+                    imgHeight = img.naturalHeight;
+                    updateWarp();
+                };
+            };
+            reader.readAsDataURL(e.target.files[0]);
+        };
+
+        // 透明度変更
+        document.getElementById('opacitySlider').oninput = (e) => { img.style.opacity = e.target.value; };
+
+        // ハンドルのドラッグ操作（スマホ対応）
+        handles.forEach((h, index) => {
+            const move = (e) => {
+                const touch = e.touches ? e.touches[0] : e;
+                hPos[index].x = touch.clientX;
+                hPos[index].y = touch.clientY;
+                h.style.left = hPos[index].x + 'px';
+                h.style.top = hPos[index].y + 'px';
+                updateWarp();
+                e.preventDefault();
+            };
+            h.addEventListener('touchstart', (e) => { h.addEventListener('touchmove', move); });
+            h.addEventListener('touchend', () => { h.removeEventListener('touchmove', move); });
+        });
+
+        function resetHandles() {
+            hPos = [{x:50, y:150}, {x:300, y:150}, {x:300, y:400}, {x:50, y:400}];
+            updateWarp();
         }
-      });
 
-      // 透明度を変える処理
-      opacitySlider.addEventListener('input', (e) => {
-        traceImage.setAttribute('material', 'opacity', e.target.value);
-      });
+        // 4点からパース変形（CSS matrix3d）を計算する魔法の関数
+        function updateWarp() {
+            if (!imgWidth) return;
+            handles.forEach((h, i) => { h.style.left = hPos[i].x + 'px'; h.style.top = hPos[i].y + 'px'; });
+
+            const src = [[0, 0], [imgWidth, 0], [imgWidth, imgHeight], [0, imgHeight]];
+            const dst = hPos.map(p => [p.x, p.y]);
+            
+            // 変換行列の計算（少し高度な数学ですが、これで画像が歪みます）
+            let a = [], b = [];
+            for (let i = 0; i < 4; i++) {
+                a.push([src[i][0], src[i][1], 1, 0, 0, 0, -src[i][0] * dst[i][0], -src[i][1] * dst[i][0]]);
+                a.push([0, 0, 0, src[i][0], src[i][1], 1, -src[i][0] * dst[i][1], -src[i][1] * dst[i][1]]);
+                b.push(dst[i][0], dst[i][1]);
+            }
+            const x = numeric.solve(a, b);
+            const m = [x[0], x[3], 0, x[6], x[1], x[4], 0, x[7], 0, 0, 1, 0, x[2], x[5], 0, 1];
+            img.style.transform = `matrix3d(${m.join(',')})`;
+        }
     </script>
-  </body>
+</body>
 </html>
