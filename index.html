@@ -2,46 +2,55 @@
 <html>
   <head>
     <meta charset="utf-8">
-    <title>お絵描きトレースAR</title>
+    <title>ARトレース：画像アップロード版</title>
     <script src="https://aframe.io/releases/1.4.0/aframe.min.js"></script>
     <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
     <style>
-      /* スライダーを画面上部に固定するデザイン */
-      .ui-container {
-        position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
-        z-index: 1000; background: rgba(255,255,255,0.8); padding: 10px; border-radius: 8px;
-        width: 80%; text-align: center;
+      .ui-panel {
+        position: fixed; top: 10px; left: 10px; z-index: 1000;
+        background: rgba(255,255,255,0.9); padding: 15px; border-radius: 10px; width: 250px;
       }
-      input[type=range] { width: 100%; }
+      input { width: 100%; margin-top: 5px; }
     </style>
   </head>
 
   <body style="margin: 0; overflow: hidden;">
-    <div class="ui-container">
-      <label>透明度 (Opacity)</label>
+    <div class="ui-panel">
+      <label>1. お手本を選ぶ</label>
+      <input type="file" id="fileInput" accept="image/*">
+      <br><br>
+      <label>2. 透明度</label>
       <input type="range" id="opacitySlider" min="0" max="1" step="0.1" value="0.5">
     </div>
 
     <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;">
       <a-marker preset="hiro">
-        <a-image 
-          id="traceImage"
-          src="https://raw.githubusercontent.com/aframevr/aframe/master/examples/image-tracking/nft/trex/trex-image-big.png" 
-          position="0 0 0" 
-          rotation="-90 0 0" 
-          width="2" height="2"
-          opacity="0.5">
-        </a-image>
+        <a-image id="traceImage" position="0 0 0" rotation="-90 0 0" width="2" height="2" opacity="0.5"></a-image>
       </a-marker>
       <a-entity camera></a-entity>
     </a-scene>
 
     <script>
-      // スライダーを動かした時に画像の透明度を変える
-      const slider = document.getElementById('opacitySlider');
-      const image = document.getElementById('traceImage');
-      slider.addEventListener('input', (e) => {
-        image.setAttribute('material', 'opacity', e.target.value);
+      const fileInput = document.getElementById('fileInput');
+      const opacitySlider = document.getElementById('opacitySlider');
+      const traceImage = document.getElementById('traceImage');
+
+      // iPhoneのライブラリから画像を読み込む処理
+      fileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            // A-Frameの画像要素に読み込んだ画像をセット
+            traceImage.setAttribute('src', event.target.result);
+          };
+          reader.readAsDataURL(file);
+        }
+      });
+
+      // 透明度を変える処理
+      opacitySlider.addEventListener('input', (e) => {
+        traceImage.setAttribute('material', 'opacity', e.target.value);
       });
     </script>
   </body>
