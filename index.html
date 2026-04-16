@@ -3,57 +3,59 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>固定式トレースツール v2</title>
+    <title>固定式トレースツール v3</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/numeric/1.2.6/numeric.min.js"></script>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; font-family: sans-serif; }
         
-        /* 背面のカメラ映像 */
-        #video { width: 100%; height: 100%; object-fit: cover; position: absolute; z-index: 1; }
-
-        /* UIパネル */
-        .ui-wrapper {
-            position: fixed; top: 10px; left: 10px; z-index: 100;
+        /* 背面のカメラ映像（iOSで動かすために大事な設定） */
+        #video { 
+            width: 100%; height: 100%; object-fit: cover; 
+            position: absolute; z-index: 1; 
+            /* 反転させたい場合は transform: scaleX(-1); を追加 */
         }
 
-        /* 開閉ボタン */
+        /* UIパネル */
+        .ui-wrapper { position: fixed; top: 10px; left: 10px; z-index: 100; }
+
         #toggle-ui {
             background: #333; color: white; border: 1px solid #fff; border-radius: 5px;
-            padding: 8px 12px; font-size: 14px; margin-bottom: 5px; cursor: pointer;
+            padding: 10px 15px; font-size: 14px; margin-bottom: 5px; cursor: pointer;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.5);
         }
 
         .controls {
-            background: rgba(0,0,0,0.8); color: white; padding: 15px; border-radius: 8px;
-            width: 220px; display: block; /* 初期状態は表示 */
+            background: rgba(0,0,0,0.85); color: white; padding: 15px; border-radius: 8px;
+            width: 220px; display: block;
         }
 
-        .controls label { display: block; margin-top: 10px; font-size: 12px; }
+        .controls label { display: block; margin-top: 10px; font-size: 12px; color: #aaa; }
         .controls input { width: 100%; margin-top: 5px; }
         
         #reset-btn {
-            margin-top: 15px; width: 100%; padding: 8px; background: #e74c3c;
+            margin-top: 15px; width: 100%; padding: 10px; background: #e74c3c;
             color: white; border: none; border-radius: 5px; font-weight: bold;
         }
 
         /* 変形コンテナ */
-        #warp-container {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            z-index: 10; pointer-events: none;
-        }
+        #warp-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; }
+        #overlay-img { position: absolute; display: none; transform-origin: 0 0; pointer-events: none; opacity: 0.5; }
 
-        #overlay-img { position: absolute; display: none; transform-origin: 0 0; pointer-events: none; }
-
-        /* 操作ハンドル（見えやすいように少し大きく、色を変更） */
+        /* 操作ハンドル */
         .handle {
             width: 44px; height: 44px; background: rgba(0, 255, 255, 0.4);
             border: 2px solid #fff; border-radius: 50%; position: absolute;
             z-index: 110; pointer-events: auto; transform: translate(-22px, -22px);
             box-shadow: 0 0 10px rgba(0,0,0,0.5);
+            /* 指で隠れても見えやすいよう中心に点 */
+            display: flex; align-items: center; justify-content: center;
         }
+        .handle::after { content: ""; width: 4px; height: 4px; background: white; border-radius: 50%; }
     </style>
 </head>
 <body>
 
-    <video id="video" autoplay playsinline></video>
+    <video id="video" autoplay playsinline muted></video>
 
     <div class="ui-wrapper">
         <button id="toggle-ui">メニューを隠す</button>
@@ -65,6 +67,148 @@
             <input type="range" id="opacitySlider" min="0" max="1" step="0.1" value="0.5">
             
             <button id="reset-btn">位置をリセット</button>
-            <p style="font-size: 10px; color: #ccc; margin-top: 10px;">※青い丸をドラッグしてパースを調整してください</p>
+            <p style="font-size: 10px; color: #888; margin-top: 12px; line-height: 1.4;">
+                【使い方】<br>
+                1. 画像を選びます<br>
+                2. 青い丸をドラッグしてパース調整<br>
+                3. メニューを隠して描画開始！
+            </p>
         </div>
     </div>
+
+    <div id="warp-container">
+        <img id="overlay-img" src="">
+        <div id="h0" class="handle"></div>
+        <div id="h1" class="handle"></div>
+        <div id="h2" class="handle"></div>
+        <div id="h3" class="handle"></div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const img = document.getElementById('overlay-img');
+        const controls = document.getElementById('controls-panel');
+        const toggleBtn = document.getElementById('toggle-ui');
+        const handles = [document.getElementById('h0'), document.getElementById('h1'), document.getElementById('h2'), document.getElementById('h3')];
+        
+        let sw = window.innerWidth;
+        let sh = window.innerHeight;
+        let hPos = [
+            {x: sw*0.2, y: sh*0.3}, {x: sw*0.8, y: sh*0.3},
+            {x: sw*0.8, y: sh*0.7}, {x: sw*0.2, y: sh*0.7}
+        ];
+        let imgWidth = 0, imgHeight = 0;
+
+        // 1. カメラの起動（iOS Safari対策版）
+        function startCamera() {
+            const constraints = {
+                video: { facingMode: "environment" }, // 背面カメラ
+                audio: false
+            };
+
+            navigator.mediaDevices.getUserMedia(constraints)
+                .then(stream => {
+                    video.srcObject = stream;
+                    // メタデータ読み込み後に再生を強制
+                    video.onloadedmetadata = () => {
+                        video.play().catch(e => console.error("Play error:", e));
+                        updateWarp(); // 初期描画
+                    };
+                })
+                .catch(err => {
+                    alert("カメラを起動できませんでした。Safariの設定でカメラを許可してください。\nエラー: " + err.name);
+                });
+        }
+
+        // 2. UIの制御
+        toggleBtn.onclick = () => {
+            if (controls.style.display === 'none') {
+                controls.style.display = 'block';
+                toggleBtn.innerText = 'メニューを隠す';
+                handles.forEach(h => h.style.display = 'flex');
+            } else {
+                controls.style.display = 'none';
+                toggleBtn.innerText = 'メニューを表示';
+                handles.forEach(h => h.style.display = 'none'); // トレース中はハンドルも隠す
+            }
+        };
+
+        // 3. 画像の読み込み
+        document.getElementById('fileInput').onchange = (e) => {
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                img.src = ev.target.result;
+                img.style.display = 'block';
+                img.onload = () => {
+                    imgWidth = img.naturalWidth;
+                    imgHeight = img.naturalHeight;
+                    updateWarp();
+                };
+            };
+            reader.readAsDataURL(e.target.files[0]);
+        };
+
+        // 4. 透明度
+        document.getElementById('opacitySlider').oninput = (e) => { img.style.opacity = e.target.value; };
+
+        // 5. ハンドルドラッグ（タッチ操作）
+        handles.forEach((h, index) => {
+            const move = (e) => {
+                const touch = e.touches[0];
+                hPos[index].x = touch.clientX;
+                hPos[index].y = touch.clientY;
+                updateWarp();
+                e.preventDefault();
+            };
+            h.addEventListener('touchstart', (e) => { 
+                h.addEventListener('touchmove', move, {passive: false}); 
+            }, {passive: false});
+            h.addEventListener('touchend', () => { 
+                h.removeEventListener('touchmove', move); 
+            });
+        });
+
+        // 6. リセットボタン
+        document.getElementById('reset-btn').onclick = () => {
+            hPos = [{x: sw*0.2, y: sh*0.3}, {x: sw*0.8, y: sh*0.3}, {x: sw*0.8, y: sh*0.7}, {x: sw*0.2, y: sh*0.7}];
+            updateWarp();
+        };
+
+        // 7. パース変形計算（matrix3d）
+        function updateWarp() {
+            // ハンドルの位置を更新
+            handles.forEach((h, i) => {
+                h.style.left = hPos[i].x + 'px';
+                h.style.top = hPos[i].y + 'px';
+            });
+
+            if (!imgWidth) return;
+
+            const src = [[0, 0], [imgWidth, 0], [imgWidth, imgHeight], [0, imgHeight]];
+            const dst = hPos.map(p => [p.x, p.y]);
+            
+            let a = [], b = [];
+            for (let i = 0; i < 4; i++) {
+                a.push([src[i][0], src[i][1], 1, 0, 0, 0, -src[i][0] * dst[i][0], -src[i][1] * dst[i][0]]);
+                a.push([0, 0, 0, src[i][0], src[i][1], 1, -src[i][0] * dst[i][1], -src[i][1] * dst[i][1]]);
+                b.push(dst[i][0], dst[i][1]);
+            }
+            try {
+                const x = numeric.solve(a, b);
+                const m = [x[0], x[3], 0, x[6], x[1], x[4], 0, x[7], 0, 0, 1, 0, x[2], x[5], 0, 1];
+                img.style.transform = `matrix3d(${m.join(',')})`;
+            } catch(e) {}
+        }
+
+        // 画面サイズ変更時に座標を再調整
+        window.onresize = () => {
+            sw = window.innerWidth;
+            sh = window.innerHeight;
+            updateWarp();
+        };
+
+        // 起動！
+        startCamera();
+    </script>
+</body>
+</html>
