@@ -3,25 +3,29 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>固定式トレースツール v3</title>
+    <title>固定式トレースツール v4</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/numeric/1.2.6/numeric.min.js"></script>
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; font-family: sans-serif; }
         
-        /* 背面のカメラ映像（iOSで動かすために大事な設定） */
+        /* 背面のカメラ映像 */
         #video { 
             width: 100%; height: 100%; object-fit: cover; 
             position: absolute; z-index: 1; 
-            /* 反転させたい場合は transform: scaleX(-1); を追加 */
+            /* transform: scaleX(-1); */ /* 左右反転させたい場合はコメントアウトを外す */
         }
 
-        /* UIパネル */
-        .ui-wrapper { position: fixed; top: 10px; left: 10px; z-index: 100; }
+        /* UIパネル（右下に配置して、左上を解放） */
+        .ui-wrapper { 
+            position: fixed; bottom: 10px; right: 10px; z-index: 100;
+            display: flex; flex-direction: column; align-items: flex-end;
+        }
 
         #toggle-ui {
             background: #333; color: white; border: 1px solid #fff; border-radius: 5px;
-            padding: 10px 15px; font-size: 14px; margin-bottom: 5px; cursor: pointer;
+            padding: 10px 15px; font-size: 14px; margin-top: 5px; cursor: pointer;
             box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+            width: fit-content;
         }
 
         .controls {
@@ -41,16 +45,16 @@
         #warp-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; }
         #overlay-img { position: absolute; display: none; transform-origin: 0 0; pointer-events: none; opacity: 0.5; }
 
-        /* 操作ハンドル */
+        /* 操作ハンドル（見えやすいように色を変更、透明度を調整） */
         .handle {
-            width: 44px; height: 44px; background: rgba(0, 255, 255, 0.4);
+            width: 44px; height: 44px; background: rgba(0, 255, 255, 0.5); /* 透明度を調整 */
             border: 2px solid #fff; border-radius: 50%; position: absolute;
             z-index: 110; pointer-events: auto; transform: translate(-22px, -22px);
             box-shadow: 0 0 10px rgba(0,0,0,0.5);
-            /* 指で隠れても見えやすいよう中心に点 */
+            /* 指で隠れても見えやすいよう中心に小さな点 */
             display: flex; align-items: center; justify-content: center;
         }
-        .handle::after { content: ""; width: 4px; height: 4px; background: white; border-radius: 50%; }
+        .handle::after { content: ""; width: 2px; height: 2px; background: white; border-radius: 50%; } /* 点を小さく */
     </style>
 </head>
 <body>
@@ -58,7 +62,6 @@
     <video id="video" autoplay playsinline muted></video>
 
     <div class="ui-wrapper">
-        <button id="toggle-ui">メニューを隠す</button>
         <div id="controls-panel" class="controls">
             <label>1. 画像を選択</label>
             <input type="file" id="fileInput" accept="image/*">
@@ -70,10 +73,11 @@
             <p style="font-size: 10px; color: #888; margin-top: 12px; line-height: 1.4;">
                 【使い方】<br>
                 1. 画像を選びます<br>
-                2. 青い丸をドラッグしてパース調整<br>
+                2. 4つの青緑色の丸をドラッグしてパース調整<br>
                 3. メニューを隠して描画開始！
             </p>
         </div>
+        <button id="toggle-ui">メニューを隠す</button>
     </div>
 
     <div id="warp-container">
@@ -93,26 +97,26 @@
         
         let sw = window.innerWidth;
         let sh = window.innerHeight;
+        // 初期位置を画面全体に広げる
         let hPos = [
-            {x: sw*0.2, y: sh*0.3}, {x: sw*0.8, y: sh*0.3},
-            {x: sw*0.8, y: sh*0.7}, {x: sw*0.2, y: sh*0.7}
+            {x: sw*0.1, y: sh*0.1}, {x: sw*0.9, y: sh*0.1},
+            {x: sw*0.9, y: sh*0.9}, {x: sw*0.1, y: sh*0.9}
         ];
         let imgWidth = 0, imgHeight = 0;
 
-        // 1. カメラの起動（iOS Safari対策版）
+        // 1. カメラの起動
         function startCamera() {
             const constraints = {
-                video: { facingMode: "environment" }, // 背面カメラ
+                video: { facingMode: "environment" },
                 audio: false
             };
 
             navigator.mediaDevices.getUserMedia(constraints)
                 .then(stream => {
                     video.srcObject = stream;
-                    // メタデータ読み込み後に再生を強制
                     video.onloadedmetadata = () => {
                         video.play().catch(e => console.error("Play error:", e));
-                        updateWarp(); // 初期描画
+                        updateWarp();
                     };
                 })
                 .catch(err => {
@@ -120,16 +124,16 @@
                 });
         }
 
-        // 2. UIの制御
+        // 2. UIの制御（修正：ハンドルは隠さない）
         toggleBtn.onclick = () => {
             if (controls.style.display === 'none') {
                 controls.style.display = 'block';
                 toggleBtn.innerText = 'メニューを隠す';
-                handles.forEach(h => h.style.display = 'flex');
+                // handles.forEach(h => h.style.display = 'flex'); // ハンドル表示（削除）
             } else {
                 controls.style.display = 'none';
                 toggleBtn.innerText = 'メニューを表示';
-                handles.forEach(h => h.style.display = 'none'); // トレース中はハンドルも隠す
+                // handles.forEach(h => h.style.display = 'none'); // ハンドル非表示（削除）
             }
         };
 
@@ -151,7 +155,7 @@
         // 4. 透明度
         document.getElementById('opacitySlider').oninput = (e) => { img.style.opacity = e.target.value; };
 
-        // 5. ハンドルドラッグ（タッチ操作）
+        // 5. ハンドルドラッグ
         handles.forEach((h, index) => {
             const move = (e) => {
                 const touch = e.touches[0];
@@ -170,13 +174,12 @@
 
         // 6. リセットボタン
         document.getElementById('reset-btn').onclick = () => {
-            hPos = [{x: sw*0.2, y: sh*0.3}, {x: sw*0.8, y: sh*0.3}, {x: sw*0.8, y: sh*0.7}, {x: sw*0.2, y: sh*0.7}];
+            hPos = [{x: sw*0.1, y: sh*0.1}, {x: sw*0.9, y: sh*0.1}, {x: sw*0.9, y: sh*0.9}, {x: sw*0.1, y: sh*0.9}];
             updateWarp();
         };
 
         // 7. パース変形計算（matrix3d）
         function updateWarp() {
-            // ハンドルの位置を更新
             handles.forEach((h, i) => {
                 h.style.left = hPos[i].x + 'px';
                 h.style.top = hPos[i].y + 'px';
